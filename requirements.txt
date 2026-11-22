@@ -1,0 +1,9 @@
+streamlit>=1.35
+ccxt>=4.3
+pandas>=2.1
+numpy>=1.26,<2.0
+scikit-learn>=1.4
+xgboost>=2.0
+lightgbm>=4.3
+tensorflow-cpu>=2.16,<2.18
+plotly>=5.20
