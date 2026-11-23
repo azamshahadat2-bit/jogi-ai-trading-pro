@@ -33,23 +33,111 @@ st.warning(
 )
 
 SYMBOLS = {
-    "BTCUSDT": "BTC/USDT",
-    "ETHUSDT": "ETH/USDT",
-    "SOLUSDT": "SOL/USDT"
+    "BTCUSDT": "BTC/USDT:USDT",
+    "ETHUSDT": "ETH/USDT:USDT",
+    "SOLUSDT": "SOL/USDT:USDT"
 }
 LOOKBACK = 30
 HISTORY_DAYS = 10
-
 with st.sidebar:
     st.header("Bot settings")
     selected_symbol = st.selectbox("Coin", list(SYMBOLS.keys()))
     call_threshold = st.slider("CALL score threshold", 0.50, 0.80, 0.60, 0.01)
     put_threshold = st.slider("PUT score threshold", 0.20, 0.50, 0.40, 0.01)
     refresh = st.checkbox("Auto refresh every 60 seconds", value=False)
-    run_button = st.button("🔄 Refresh / Analyze", type="primary")
-
+    run_button = st.button("🔄 Refresh / Analyze", type="primary"
+     
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_ohlcv(symbol, days=10):
+
+    exchange = ccxt.binanceusdm({
+        "enableRateLimit": True,
+        "timeout": 30000,
+        "options": {
+            "defaultType": "future",
+            "adjustForTimeDifference": True
+        }
+    })
+
+    try:
+        exchange.load_markets()
+
+        if symbol not in exchange.markets:
+            raise RuntimeError(
+                f"Futures symbol not found: {symbol}"
+            )
+
+        since = exchange.milliseconds() - (
+            days * 24 * 60 * 60 * 1000
+        )
+
+        rows = []
+
+        while since < exchange.milliseconds():
+
+            batch = exchange.fetch_ohlcv(
+                symbol,
+                timeframe="1m",
+                since=since,
+                limit=1000
+            )
+
+            if not batch:
+                break
+
+            rows.extend(batch)
+
+            next_since = batch[-1][0] + 60000
+
+            if next_since <= since:
+                break
+
+            since = next_since
+
+            time.sleep(
+                max(exchange.rateLimit / 1000, 0.1)
+            )
+
+        if not rows:
+            raise RuntimeError(
+                "Binance Futures returned no candles."
+            )
+
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "timestamp", "open", "high",
+                "low", "close", "volume"
+            ]
+        )
+
+        df = df.drop_duplicates("timestamp")
+
+        df["timestamp"] = pd.to_datetime(
+            df["timestamp"],
+            unit="ms",
+            utc=True
+        )
+
+        df = df.set_index("timestamp").sort_index()
+
+        now = pd.Timestamp.now(tz="UTC")
+
+        df = df[
+            df.index + pd.Timedelta(minutes=1) <= now
+        ]
+
+        return df.astype(float)
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Binance Futures Error: {e}"
+        ) from e
+
+    finally:
+        exchange.close()
+        
+
     exchange = ccxt.binance({"enableRateLimit": True, "timeout": 20000})
     since = exchange.milliseconds() - days * 24 * 60 * 60 * 1000
     rows = []
